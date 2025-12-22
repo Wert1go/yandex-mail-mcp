@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from imapclient import imap_utf7
 
+VERSION = "0.0.1"
+
 # Load environment variables from script's directory
 SCRIPT_DIR = Path(__file__).parent.resolve()
 load_dotenv(SCRIPT_DIR / ".env")
