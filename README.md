@@ -85,6 +85,28 @@ source .venv/bin/activate
 pytest test_server.py -v
 ```
 
+## Security (prompt injection + least privilege)
+
+Email content is **untrusted input**. If you use an LLM agent (Cursor, Claude, etc.) to read emails and call tools, attackers can embed **prompt-injection** instructions inside email text/HTML.
+
+### Recommended hardening
+
+- **Use app passwords** (not your primary password) and enable 2FA in Yandex.
+- **Protect `.env`**: keep it local-only and restrict file permissions (e.g. `chmod 600 .env` on macOS/Linux).
+- **Least privilege tools by default**:
+  - This server registers only read tools + `send_email` by default.
+  - High-risk tools are **implemented but not exposed** unless you explicitly enable them:
+    - `ENABLE_FILE_DOWNLOAD=1` for `download_attachment`
+    - `ENABLE_MUTATIONS=1` for `move_email` / `delete_email`
+- **Sending policy (strongly recommended)**:
+  - Set `ALLOWED_RECIPIENT_DOMAINS` and/or `ALLOWED_RECIPIENTS` to prevent exfiltration via `send_email`.
+  - Set `SEND_RATE_LIMIT_PER_MINUTE` and `MAX_SEND_BODY_CHARS`.
+- **Reduce prompt-injection surface**:
+  - Limit returned body size with `MAX_READ_BODY_CHARS`.
+  - Treat `read_email` output as data; never follow instructions inside emails.
+- **Detection / audit**:
+  - Enable `ENABLE_INJECTION_LOGGING=1` to log suspicious prompt-injection *signals* detected in emails (logs metadata + signal names, not bodies).
+
 ## License
 
 MIT

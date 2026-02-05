@@ -1,4 +1,4 @@
-mcp
-python-dotenv
-imapclient
-pytest
+mcp==1.26.0
+python-dotenv==1.2.1
+imapclient==3.1.0
+pytest==9.0.2
