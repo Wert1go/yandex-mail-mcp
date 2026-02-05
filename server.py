@@ -53,6 +53,9 @@ MAX_SEND_BODY_CHARS = int(os.getenv("MAX_SEND_BODY_CHARS", "10000"))
 SEND_RATE_LIMIT_PER_MINUTE = int(os.getenv("SEND_RATE_LIMIT_PER_MINUTE", "5"))
 ENABLE_INJECTION_LOGGING = os.getenv("ENABLE_INJECTION_LOGGING", "1") == "1"
 INJECTION_SIGNALS_MAX = int(os.getenv("INJECTION_SIGNALS_MAX", "10"))
+LOG_INJECTION_ONLY_IF_INSTRUCTION = os.getenv("LOG_INJECTION_ONLY_IF_INSTRUCTION", "1") == "1"
+INJECTION_BLOCK_SEND_ON_INSTRUCTION = os.getenv("INJECTION_BLOCK_SEND_ON_INSTRUCTION", "0") == "1"
+INJECTION_BLOCK_WINDOW_SECONDS = int(os.getenv("INJECTION_BLOCK_WINDOW_SECONDS", "600"))
 
 # Recipient allowlist. If both are empty -> allow all (not recommended).
 ALLOWED_RECIPIENTS = os.getenv("ALLOWED_RECIPIENTS", "").strip()
@@ -66,6 +69,7 @@ ENABLE_MUTATIONS = os.getenv("ENABLE_MUTATIONS", "0") == "1"
 mcp = FastMCP("Yandex Mail")
 
 _send_timestamps: deque[float] = deque()
+_last_injection_context: dict[str, object] = {}
 
 
 def _split_csv(value: str) -> set[str]:
@@ -172,6 +176,17 @@ _INJECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("mentions_download_attachment", re.compile(r"(?i)\bdownload_attachment\b")),
     ("mentions_move_delete", re.compile(r"(?i)\b(move_email|delete_email)\b")),
 ]
+
+_INSTRUCTION_SIGNAL_NAMES: set[str] = {
+    "ignore_instructions_en",
+    "ignore_instructions_ru",
+    "tool_calling_en",
+    "tool_calling_ru",
+    "system_prompt_terms",
+    "mentions_send_email",
+    "mentions_download_attachment",
+    "mentions_move_delete",
+}
 
 
 def _detect_prompt_injection_signals(*texts: str) -> list[str]:
@@ -467,7 +482,9 @@ def read_email(folder: str, email_id: str) -> dict:
         if ENABLE_INJECTION_LOGGING:
             html_as_text = _html_to_text(body_html) if body_html else ""
             signals = _detect_prompt_injection_signals(subject, from_addr, to_addr, body_text, html_as_text)
-            if signals:
+            instruction_signals = [s for s in signals if s in _INSTRUCTION_SIGNAL_NAMES]
+            should_log = bool(instruction_signals) if LOG_INJECTION_ONLY_IF_INSTRUCTION else bool(signals)
+            if should_log and signals:
                 logger.warning(
                     "Potential prompt injection signals detected: email_id=%s folder=%s signals=%s from=%s subject=%s",
                     _single_line(email_id),
@@ -476,6 +493,22 @@ def read_email(folder: str, email_id: str) -> dict:
                     _single_line(from_addr)[:200],
                     _single_line(subject)[:200],
                 )
+            if instruction_signals:
+                _last_injection_context.clear()
+                _last_injection_context.update(
+                    {
+                        "time": time.time(),
+                        "folder": folder,
+                        "email_id": email_id,
+                        "signals": signals,
+                        "instruction_signals": instruction_signals,
+                    }
+                )
+        else:
+            signals = []
+            instruction_signals = []
+
+        injection_risk = "high" if instruction_signals else ("medium" if signals else "low")
 
         return {
             "id": email_id,
@@ -488,7 +521,10 @@ def read_email(folder: str, email_id: str) -> dict:
             "attachments": attachments,
             "urls": extracted_urls,
             "truncated": truncated,
-            "untrusted_content": True
+            "untrusted_content": True,
+            "injection_signals": signals,
+            "instruction_signals": instruction_signals,
+            "injection_risk": injection_risk
         }
 
 
@@ -582,6 +618,15 @@ def send_email(
     """
     if not EMAIL:
         raise ValueError("YANDEX_EMAIL must be set in .env")
+
+    if INJECTION_BLOCK_SEND_ON_INSTRUCTION and _last_injection_context:
+        t = float(_last_injection_context.get("time", 0) or 0)
+        instruction_signals = _last_injection_context.get("instruction_signals") or []
+        if instruction_signals and (time.time() - t) <= max(0, INJECTION_BLOCK_WINDOW_SECONDS):
+            raise PermissionError(
+                "send_email blocked by policy: recent email contained instructional prompt-injection signals. "
+                "Wait for the window to expire or disable INJECTION_BLOCK_SEND_ON_INSTRUCTION."
+            )
 
     # Prevent header injection
     _require_no_crlf(subject, "subject")
