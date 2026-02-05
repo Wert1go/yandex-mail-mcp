@@ -62,8 +62,13 @@ ALLOWED_RECIPIENTS = os.getenv("ALLOWED_RECIPIENTS", "").strip()
 ALLOWED_RECIPIENT_DOMAINS = os.getenv("ALLOWED_RECIPIENT_DOMAINS", "").strip()
 
 # Optional tool registration (default OFF)
-ENABLE_FILE_DOWNLOAD = os.getenv("ENABLE_FILE_DOWNLOAD", "0") == "1"
+ENABLE_FILE_DOWNLOAD = os.getenv("ENABLE_FILE_DOWNLOAD", "1") == "1"
 ENABLE_MUTATIONS = os.getenv("ENABLE_MUTATIONS", "0") == "1"
+
+# Attachment download safety
+DOWNLOAD_BASE_DIR = os.getenv("DOWNLOAD_BASE_DIR", str(Path.home() / "Downloads" / "yandex-mail-mcp")).strip()
+ALLOW_CUSTOM_SAVE_DIR = os.getenv("ALLOW_CUSTOM_SAVE_DIR", "0") == "1"
+MAX_ATTACHMENT_BYTES = int(os.getenv("MAX_ATTACHMENT_BYTES", str(25 * 1024 * 1024)))  # 25 MiB default
 
 # Create MCP server
 mcp = FastMCP("Yandex Mail")
@@ -157,6 +162,28 @@ def _extract_urls(text: str, limit: int = 50) -> list[str]:
     # Simple URL extraction (data-only)
     urls = re.findall(r"https?://[^\s<>()\"']+", text)
     return urls[:limit]
+
+def _safe_filename(name: str) -> str:
+    # Prevent path traversal and weird characters.
+    base = Path(name).name
+    base = re.sub(r"[\x00-\x1f\x7f]", "_", base)  # control chars
+    base = re.sub(r"[\\/]", "_", base)
+    base = base.strip().strip(".")
+    if not base:
+        return "attachment"
+    if len(base) > 200:
+        root, ext = os.path.splitext(base)
+        base = root[:180] + ext[:20]
+    return base
+
+
+def _ensure_within_base(path: Path, base: Path) -> None:
+    base_resolved = base.resolve()
+    path_resolved = path.resolve()
+    if base_resolved == path_resolved:
+        return
+    if base_resolved not in path_resolved.parents:
+        raise PermissionError("Refusing to write outside DOWNLOAD_BASE_DIR")
 
 
 def _single_line(value: str) -> str:
@@ -528,6 +555,7 @@ def read_email(folder: str, email_id: str) -> dict:
         }
 
 
+@mcp.tool()
 def download_attachment(
     folder: str,
     email_id: str,
@@ -545,13 +573,22 @@ def download_attachment(
 
     Returns dict with saved file path and size.
     """
-    # Default save directory
-    if save_dir is None:
-        save_dir = str(Path.home() / "Downloads")
+    if not ENABLE_FILE_DOWNLOAD:
+        raise PermissionError("download_attachment is disabled by policy (ENABLE_FILE_DOWNLOAD=0)")
 
-    save_path = Path(save_dir)
-    if not save_path.exists():
-        save_path.mkdir(parents=True, exist_ok=True)
+    base_dir = Path(DOWNLOAD_BASE_DIR)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    if save_dir and ALLOW_CUSTOM_SAVE_DIR:
+        save_path = Path(save_dir)
+        # If relative, treat as inside base_dir
+        if not save_path.is_absolute():
+            save_path = base_dir / save_path
+    else:
+        save_path = base_dir
+
+    _ensure_within_base(save_path, base_dir)
+    save_path.mkdir(parents=True, exist_ok=True)
 
     with imap_connection() as conn:
         status, _ = conn.select(folder, readonly=True)
@@ -578,14 +615,28 @@ def download_attachment(
                     # Found the attachment
                     payload = part.get_payload(decode=True)
                     if payload:
+                        if MAX_ATTACHMENT_BYTES > 0 and len(payload) > MAX_ATTACHMENT_BYTES:
+                            raise PermissionError("Attachment too large by policy")
                         # Save to file
-                        file_path = save_path / decoded_filename
+                        safe_name = _safe_filename(decoded_filename)
+                        file_path = save_path / safe_name
+                        _ensure_within_base(file_path, base_dir)
+
+                        # Avoid overwriting existing files
+                        if file_path.exists():
+                            stem = file_path.stem
+                            suffix = file_path.suffix
+                            for i in range(1, 1000):
+                                candidate = save_path / f"{stem} ({i}){suffix}"
+                                if not candidate.exists():
+                                    file_path = candidate
+                                    break
                         with open(file_path, "wb") as f:
                             f.write(payload)
 
                         return {
                             "status": "downloaded",
-                            "filename": decoded_filename,
+                            "filename": safe_name,
                             "path": str(file_path),
                             "size": len(payload),
                             "content_type": part.get_content_type()

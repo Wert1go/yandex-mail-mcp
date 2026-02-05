@@ -96,7 +96,7 @@ Email content is **untrusted input**. If you use an LLM agent (Cursor, Claude, e
 - **Least privilege tools by default**:
   - This server registers only read tools + `send_email` by default.
   - High-risk tools are **implemented but not exposed** unless you explicitly enable them:
-    - `ENABLE_FILE_DOWNLOAD=1` for `download_attachment`
+    - `download_attachment` is exposed when `ENABLE_FILE_DOWNLOAD=1` (default: enabled)
     - `ENABLE_MUTATIONS=1` for `move_email` / `delete_email`
 - **Sending policy (strongly recommended)**:
   - Set `ALLOWED_RECIPIENT_DOMAINS` and/or `ALLOWED_RECIPIENTS` to prevent exfiltration via `send_email`.
@@ -108,6 +108,10 @@ Email content is **untrusted input**. If you use an LLM agent (Cursor, Claude, e
   - Enable `ENABLE_INJECTION_LOGGING=1` to log suspicious prompt-injection *signals* detected in emails (logs metadata + signal names, not bodies).
   - `LOG_INJECTION_ONLY_IF_INSTRUCTION=1` reduces noise by logging only when “instructional” patterns are detected.
   - Optional: `INJECTION_BLOCK_SEND_ON_INSTRUCTION=1` blocks `send_email` for `INJECTION_BLOCK_WINDOW_SECONDS` after reading an email with instructional patterns.
+- **Attachment downloads**:
+  - Downloads are written under `DOWNLOAD_BASE_DIR` (default: `~/Downloads/yandex-mail-mcp`).
+  - To prevent path traversal and overwrites, filenames are sanitized and existing files get a suffix.
+  - Limit size with `MAX_ATTACHMENT_BYTES` (default: 25 MiB).
 
 ## License
 
