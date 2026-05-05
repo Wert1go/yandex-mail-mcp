@@ -11,19 +11,31 @@ MCP (Model Context Protocol) server for Yandex Mail. Enables Claude Desktop and 
 - **Send emails** — plain text or HTML
 - **Move/Delete emails** — organize your mailbox
 
+## Prerequisites
+
+- **Python 3.10 or newer.** macOS ships with Python 3.9 by default — `mcp` requires 3.10+, otherwise `pip install` fails with a confusing `Could not find a version that satisfies the requirement mcp` error. Install a newer Python via Homebrew:
+
+  ```bash
+  brew install python@3.12
+  ```
+
+  Or use [`uv`](https://docs.astral.sh/uv/) which handles Python versions automatically.
+
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/yandex-mail-mcp.git
+git clone https://github.com/Wert1go/yandex-mail-mcp.git
 cd yandex-mail-mcp
 
-# Create virtual environment
-python3 -m venv .venv
+# Create virtual environment with Python 3.10+
+python3.12 -m venv .venv  # adjust to your installed version
 source .venv/bin/activate
 
-# Install dependencies
+# Install runtime dependencies
 pip install -r requirements.txt
+# Or install with dev tools (pytest):
+# pip install -r requirements-dev.txt
 
 # Configure credentials
 cp .env.example .env
@@ -46,12 +58,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "yandex-mail": {
-      "command": "/path/to/yandex-mail-mcp/.venv/bin/python",
-      "args": ["/path/to/yandex-mail-mcp/server.py"]
+      "command": "/path/to/yandex-mail-mcp/run.sh"
     }
   }
 }
 ```
+
+`run.sh` auto-detects `.venv` (if present) and falls back to system `python3` otherwise.
 
 Restart Claude Desktop after configuration.
 

@@ -1,0 +1,28 @@
+[project]
+name = "yandex-mail-mcp"
+version = "0.1.0"
+description = "MCP server for Yandex Mail — read, search, and send emails via IMAP/SMTP"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "mcp>=1.26,<2",
+    "python-dotenv>=1.0,<2",
+    "imapclient>=3.0,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10",
+]
+
+[project.urls]
+Repository = "https://github.com/Wert1go/yandex-mail-mcp"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server"]
